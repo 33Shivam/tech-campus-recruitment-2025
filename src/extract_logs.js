@@ -116,7 +116,6 @@ if (process.argv.length !== 4) {
 
   
   // Define the output file path in the ../output directory
-  const outputFilePath = path.join(__dirname, '../output', `${targetDate}_logs.txt`);
   
-  findLogsByDateStream(filePath, targetDate, outputFilePath);
+  findLogsByDateStream(filePath, targetDate);
 }
