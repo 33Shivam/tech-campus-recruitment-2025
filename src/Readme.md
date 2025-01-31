@@ -6,5 +6,5 @@ node extract_logs log_file_name YYYY-MM-DD
 
 Example: 
 ```
-node extract_logs logs.txt 2025-02-01
+node extract_logs.js <file_path> <YYYY-MM-DD> <output_file_path>
 ```
