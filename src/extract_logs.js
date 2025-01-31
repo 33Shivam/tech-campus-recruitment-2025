@@ -1,7 +1,5 @@
 const fs = require('fs');
 
-
-//calculate Rolling hash
 class RollingHash {
   constructor(windowSize, base = 256, mod = 1e9 + 7) {
     this.windowSize = windowSize;
@@ -36,9 +34,7 @@ class RollingHash {
   }
 }
 
-//compute hashed and search using rabin karp
-
-function findLogsByDateStream(filePath, targetDate) {
+function findLogsByDateStream(filePath, targetDate, outputFilePath) {
   // Precompute target hash
   const targetHash = new RollingHash(targetDate.length);
   for (const c of targetDate) {
@@ -53,6 +49,9 @@ function findLogsByDateStream(filePath, targetDate) {
   let charCount = 0;
   let capturingLine = false;
 
+  // Create a write stream for the output file
+  const outputStream = fs.createWriteStream(outputFilePath, { encoding: 'utf8' });
+
   const stream = fs.createReadStream(filePath, { encoding: 'utf8' });
 
   stream.on('data', (chunk) => {
@@ -60,7 +59,8 @@ function findLogsByDateStream(filePath, targetDate) {
       if (capturingLine) {
         lineBuffer.push(char);
         if (char === '\n') {
-          console.log(lineBuffer.join('').trim());
+          // Write the line to the output file
+          outputStream.write(lineBuffer.join('').trim() + '\n');
           lineBuffer = [];
           capturingLine = false;
           isNewLine = true;
@@ -98,8 +98,10 @@ function findLogsByDateStream(filePath, targetDate) {
 
   stream.on('end', () => {
     if (capturingLine) {
-      console.log(lineBuffer.join('').trim());
+      outputStream.write(lineBuffer.join('').trim() + '\n');
     }
+    // Close the output stream after processing
+    outputStream.end();
   });
 
   stream.on('error', (err) => {
@@ -107,15 +109,12 @@ function findLogsByDateStream(filePath, targetDate) {
   });
 }
 
-// Command-line execution: node extract_logs.js <file_path> <YYYY-MM-DD>
-if (process.argv.length !== 4) {
-  console.log('Usage: node logExtractor.js <file_path> <YYYY-MM-DD>');
+// Command-line execution: node logExtractor.js <file_path> <YYYY-MM-DD> <output_file_path>
+if (process.argv.length !== 5) {
+  console.log('Usage: node logExtractor.js <file_path> <YYYY-MM-DD> <output_file_path>');
 } else {
   const filePath = process.argv[2];
   const targetDate = process.argv[3];
-
-  
-  // Define the output file path in the ../output directory
-  
-  findLogsByDateStream(filePath, targetDate);
+  const outputFilePath = process.argv[4];
+  findLogsByDateStream(filePath, targetDate, outputFilePath);
 }
