@@ -1,5 +1,7 @@
 const fs = require('fs');
 
+
+//calculate Rolling hash
 class RollingHash {
   constructor(windowSize, base = 256, mod = 1e9 + 7) {
     this.windowSize = windowSize;
@@ -33,6 +35,8 @@ class RollingHash {
     return this.window.join('');
   }
 }
+
+//compute hashed and search using rabin karp
 
 function findLogsByDateStream(filePath, targetDate) {
   // Precompute target hash
@@ -103,7 +107,7 @@ function findLogsByDateStream(filePath, targetDate) {
   });
 }
 
-// Command-line execution: node logExtractor.js <file_path> <YYYY-MM-DD>
+// Command-line execution: node extract_logs.js <file_path> <YYYY-MM-DD>
 if (process.argv.length !== 4) {
   console.log('Usage: node logExtractor.js <file_path> <YYYY-MM-DD>');
 } else {
