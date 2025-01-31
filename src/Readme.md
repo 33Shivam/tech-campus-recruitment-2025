@@ -1,3 +1,10 @@
-# Source Directory
+# How to run the code
+To extract the logs run in terminal : 
+```Terminal
+node extract_logs log_file_name YYYY-MM-DD
+```
 
-Make sure that your source code is in the `src` directory.
+Example: 
+```
+node extract_logs logs.txt 2025-02-01
+```
