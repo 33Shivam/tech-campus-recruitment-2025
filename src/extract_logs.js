@@ -1,4 +1,5 @@
 const fs = require('fs');
+const path = require('path');
 
 class RollingHash {
   constructor(windowSize, base = 256, mod = 1e9 + 7) {
@@ -34,7 +35,7 @@ class RollingHash {
   }
 }
 
-function findLogsByDateStream(filePath, targetDate, outputFilePath) {
+function findLogsByDateStream(filePath, targetDate) {
   // Precompute target hash
   const targetHash = new RollingHash(targetDate.length);
   for (const c of targetDate) {
@@ -48,6 +49,15 @@ function findLogsByDateStream(filePath, targetDate, outputFilePath) {
   let isNewLine = true;
   let charCount = 0;
   let capturingLine = false;
+
+  // Create the output directory if it doesn't exist
+  const outputDir = 'output';
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir);
+  }
+
+  // Define the output file path
+  const outputFilePath = path.join(outputDir, `output_${targetDate}.txt`);
 
   // Create a write stream for the output file
   const outputStream = fs.createWriteStream(outputFilePath, { encoding: 'utf8' });
@@ -109,12 +119,11 @@ function findLogsByDateStream(filePath, targetDate, outputFilePath) {
   });
 }
 
-// Command-line execution: node logExtractor.js <file_path> <YYYY-MM-DD> <output_file_path>
-if (process.argv.length !== 5) {
-  console.log('Usage: node logExtractor.js <file_path> <YYYY-MM-DD> <output_file_path>');
+// Command-line execution: node logExtractor.js <file_path> <YYYY-MM-DD>
+if (process.argv.length !== 4) {
+  console.log('Usage: node logExtractor.js <file_path> <YYYY-MM-DD>');
 } else {
   const filePath = process.argv[2];
   const targetDate = process.argv[3];
-  const outputFilePath = process.argv[4];
-  findLogsByDateStream(filePath, targetDate, outputFilePath);
+  findLogsByDateStream(filePath, targetDate);
 }
