@@ -1,188 +1,113 @@
 const fs = require('fs');
-const readline = require('readline');
-const { promisify } = require('util');
 
-const open = promisify(fs.open);
-const stat = promisify(fs.stat);
-const read = promisify(fs.read);
-const writeFile = promisify(fs.writeFile);
-const mkdir = promisify(fs.mkdir);
-
-async function readNextLine(fd, position, fileSize) {
-    const bufferSize = 1024;
-    let currentPos = position;
-    let foundNewline = false;
-    let lineStart = currentPos;
-
-    while (currentPos < fileSize) {
-        const buffer = Buffer.alloc(bufferSize);
-        const bytesRead = (await read(fd, buffer, 0, bufferSize, currentPos)).bytesRead;
-        if (bytesRead === 0) break;
-
-        const newlinePos = buffer.indexOf('\n'.charCodeAt(0));
-        if (newlinePos !== -1) {
-            lineStart = currentPos + newlinePos + 1;
-            foundNewline = true;
-            break;
-        }
-        currentPos += bytesRead;
+class RollingHash {
+  constructor(windowSize, base = 256, mod = 1e9 + 7) {
+    this.windowSize = windowSize;
+    this.base = base;
+    this.mod = mod;
+    this.hash = 0;
+    this.window = [];
+    this.basePower = 1;
+    for (let i = 0; i < windowSize - 1; i++) {
+      this.basePower = (this.basePower * this.base) % this.mod;
     }
+  }
 
-    if (!foundNewline) {
-        lineStart = fileSize;
+  update(char) {
+    if (this.window.length === this.windowSize) {
+      const oldest = this.window.shift();
+      this.hash = (this.hash - (oldest.charCodeAt(0) * this.basePower) % this.mod + this.mod) % this.mod;
     }
+    const code = char.charCodeAt(0);
+    this.hash = (this.hash * this.base + code) % this.mod;
+    this.window.push(char);
+    return this.hash;
+  }
 
-    if (lineStart >= fileSize) {
-        return { dateBuffer: null, newPosition: lineStart };
-    }
+  reset() {
+    this.hash = 0;
+    this.window = [];
+  }
 
-    const dateBuffer = Buffer.alloc(10);
-    const bytesRead = (await read(fd, dateBuffer, 0, 10, lineStart)).bytesRead;
-    if (bytesRead < 10) {
-        return { dateBuffer: null, newPosition: lineStart };
-    }
-
-    return { dateBuffer, newPosition: lineStart };
+  getWindow() {
+    return this.window.join('');
+  }
 }
 
+function findLogsByDateStream(filePath, targetDate) {
+  // Precompute target hash
+  const targetHash = new RollingHash(targetDate.length);
+  for (const c of targetDate) {
+    targetHash.update(c);
+  }
+  const targetHashValue = targetHash.hash;
 
-//Binary Search to find the starting position so we dont have to search the entire file for starting date
-async function findStartPosition(filePath, targetDate) { 
-    const targetBuffer = Buffer.from(targetDate);
-    const fd = await open(filePath, 'r');
-    const stats = await stat(filePath);
-    let low = 0;
-    let high = stats.size;
-    let startPos = null;
+  // Initialize stream processor
+  const rh = new RollingHash(targetDate.length);
+  let lineBuffer = [];
+  let isNewLine = true;
+  let charCount = 0;
+  let capturingLine = false;
 
-    while (low < high) {
-        const mid = Math.floor((low + high) / 2);
-        const { dateBuffer, newPosition } = await readNextLine(fd, mid, stats.size);
+  const stream = fs.createReadStream(filePath, { encoding: 'utf8' });
 
-        if (!dateBuffer) {
-            high = mid;
-            continue;
+  stream.on('data', (chunk) => {
+    for (const char of chunk) {
+      if (capturingLine) {
+        lineBuffer.push(char);
+        if (char === '\n') {
+          console.log(lineBuffer.join('').trim());
+          lineBuffer = [];
+          capturingLine = false;
+          isNewLine = true;
+          charCount = 0;
+          rh.reset();
         }
+        continue;
+      }
 
-        const cmp = dateBuffer.compare(targetBuffer);
-        if (cmp < 0) {
-            low = newPosition;
-        } else {
-            high = mid;
+      if (char === '\n') {
+        isNewLine = true;
+        charCount = 0;
+        rh.reset();
+        continue;
+      }
+
+      if (isNewLine && charCount < targetDate.length) {
+        rh.update(char);
+        charCount++;
+        lineBuffer.push(char);
+
+        if (charCount === targetDate.length) {
+          if (rh.hash === targetHashValue && rh.getWindow() === targetDate) {
+            capturingLine = true;
+          } else {
+            lineBuffer = [];
+            isNewLine = false;
+            charCount = 0;
+            rh.reset();
+          }
         }
+      }
     }
+  });
 
-    const { dateBuffer } = await readNextLine(fd, low, stats.size);
-    if (dateBuffer && dateBuffer.compare(targetBuffer) === 0) {
-        startPos = low;
+  stream.on('end', () => {
+    if (capturingLine) {
+      console.log(lineBuffer.join('').trim());
     }
+  });
 
-    await fd.close();
-    return startPos;
+  stream.on('error', (err) => {
+    console.error('Error reading file:', err);
+  });
 }
 
-//Binary Search to find the ending position so we dont have to search the entire file for starting date
-async function findEndPosition(filePath, targetDate, startPos) { 
-    const nextDay = new Date(targetDate);
-    nextDay.setDate(nextDay.getDate() + 1);
-    const nextDayStr = nextDay.toISOString().split('T')[0];
-    const targetBuffer = Buffer.from(nextDayStr);
-
-    const fd = await open(filePath, 'r');
-    const stats = await stat(filePath);
-    let low = startPos;
-    let high = stats.size;
-    let endPos = stats.size;
-
-    while (low < high) {
-        const mid = Math.floor((low + high) / 2);
-        const { dateBuffer, newPosition } = await readNextLine(fd, mid, stats.size);
-
-        if (!dateBuffer) {
-            high = mid;
-            continue;
-        }
-
-        const cmp = dateBuffer.compare(targetBuffer);
-        if (cmp < 0) {
-            low = newPosition;
-        } else {
-            high = mid;
-        }
-    }
-
-    const { dateBuffer } = await readNextLine(fd, low, stats.size);
-    if (dateBuffer && dateBuffer.compare(targetBuffer) === 0) {
-        endPos = low;
-    } else {
-        endPos = stats.size;
-    }
-
-    await fd.close();
-    return endPos;
+// Command-line execution: node logExtractor.js <file_path> <YYYY-MM-DD>
+if (process.argv.length !== 4) {
+  console.log('Usage: node logExtractor.js <file_path> <YYYY-MM-DD>');
+} else {
+  const filePath = process.argv[2];
+  const targetDate = process.argv[3];
+  findLogsByDateStream(filePath, targetDate);
 }
-
-async function extractLogs(inputFile, outputFile, startPos, endPos, targetDate) {
-    const inputStream = fs.createReadStream(inputFile, { start: startPos, end: endPos - 1 });
-    const rl = readline.createInterface({
-        input: inputStream,
-        crlfDelay: Infinity
-    });
-    const writeStream = fs.createWriteStream(outputFile);
-
-    return new Promise((resolve, reject) => {
-        rl.on('line', (line) => {
-            if (line.startsWith(targetDate)) {
-                writeStream.write(line + '\n');
-            }
-        });
-
-        rl.on('close', () => {
-            writeStream.end();
-            resolve();
-        });
-
-        rl.on('error', reject);
-        writeStream.on('error', reject);
-    });
-}
-
-async function main() {
-    const args = process.argv.slice(2);
-    if (args.length !== 1) {
-        console.error('Usage: node extract_logs.js YYYY-MM-DD');
-        process.exit(1);
-    }
-
-    const targetDate = args[0];
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
-        console.error('Invalid date format. Use YYYY-MM-DD.');
-        process.exit(1);
-    }
-
-    const inputFile = 'test_logs.log';
-    const outputDir = 'output';
-    const outputFile = `${outputDir}/output_${targetDate}.txt`;
-
-    try {
-        await mkdir(outputDir, { recursive: true });
-    } catch (err) {
-        if (err.code !== 'EEXIST') throw err;
-    }
-
-    const startPos = await findStartPosition(inputFile, targetDate);
-    if (startPos === null) {
-        await writeFile(outputFile, '');
-        console.log(`No logs found for ${targetDate}`);
-        return;
-    }
-
-    const endPos = await findEndPosition(inputFile, targetDate, startPos);
-    await extractLogs(inputFile, outputFile, startPos, endPos, targetDate);
-    console.log(`Logs extracted to ${outputFile}`);
-}
-
-main().catch(err => {
-    console.error('Error:', err);
-    process.exit(1);
-});
